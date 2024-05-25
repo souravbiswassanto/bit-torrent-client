@@ -17,4 +17,6 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println(torrent.Announce, torrent.Name, torrent.Length)
+	err = torrent.Download(args2)
+	log.Fatalf("%v", err)
 }
