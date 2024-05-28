@@ -2,12 +2,10 @@ package torrentfile
 
 import (
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
-	"github.com/jackpal/bencode-go"
+	"github.com/souravbiswassanto/bit-torrent-client/peers"
 )
 
 type bencodeTrackerResp struct {
@@ -18,31 +16,32 @@ type bencodeTrackerResp struct {
 // requestPeers this requests the available peers from tracker.
 // it first builds tracker urls and then make a http get request
 // to the tracker. Tracker then returns the peer list in the response's body
-func (t *TorrentFile) requestPeers(peerId [20]byte, port uint16) ([]string, error) {
-	trackerUrl, err := t.buildTrackerUrls(peerId, port)
+func (t *TorrentFile) requestPeers(peerId [20]byte, port uint16) ([]peers.Peer, error) {
+	tracker, err := t.buildTrackerUrl(peerId, port)
 	if err != nil {
 		return nil, err
 	}
-	httpClient := &http.Client{Timeout: time.Second * 15}
-	// make a get request to the tracker for peers for this torrent file
-	resp, err := httpClient.Get(trackerUrl)
-	if err != nil {
-		return nil, err
+
+	switch tracker.Scheme {
+	case "http", "https":
+		return t.RequestPeersHTTP(tracker, peerId, port)
+	case "udp":
+		return t.RequestPeersUDP(tracker, peerId, port)
+	default:
+		return nil, fmt.Errorf("unsupported protocol scheme")
+
 	}
-	defer resp.Body.Close()
-	trackerResponse := bencodeTrackerResp{}
-	err = bencode.Unmarshal(resp.Body, &trackerResponse)
-	return []string{trackerUrl}, err
 }
 
 // buildTrackerUrls builds a tracker urls from announce part of the
 // TorrentFile. It lets tracker to know which file we want and announce
 // our presence in the peerlist by queries params part
-func (t *TorrentFile) buildTrackerUrls(peerId [20]byte, port uint16) (string, error) {
+func (t *TorrentFile) buildTrackerUrl(peerId [20]byte, port uint16) (*url.URL, error) {
 	tracker, err := url.Parse(t.Announce)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+
 	quries := url.Values{
 		"info_hash":  []string{string(t.InfoHash[:])},
 		"peer_id":    []string{string(peerId[:])},
@@ -53,6 +52,43 @@ func (t *TorrentFile) buildTrackerUrls(peerId [20]byte, port uint16) (string, er
 		"left":       []string{strconv.Itoa(t.Length)},
 	}
 	tracker.RawQuery = quries.Encode()
-	fmt.Println("Tracker url is: ", tracker.String())
-	return tracker.String(), nil
+
+	return tracker, nil
 }
+
+// func (t *TorrentFile) solve(tracker *url.URL) {
+// 	server, err := net.ResolveUDPAddr("udp", tracker.Host)
+// 	if err != nil {
+// 		fmt.Printf("failed to resolve UDP address: %w", err)
+// 		return
+// 	}
+// 	fmt.Println(server.String())
+// 	conn, err := net.DialUDP("udp", nil, server)
+// 	if err != nil {
+// 		fmt.Printf("failed to dial UDP: %w", err)
+// 		return
+// 	}
+// 	defer conn.Close()
+// 	rn := rnd.Int31()
+// 	_, err = conn.Write(buildConnectRequest(rn))
+// 	if err != nil {
+// 		log.Fatalln(err)
+// 	}
+
+// 	// Read the connect response
+// 	response := make([]byte, 16)
+// 	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+// 	_, err = conn.Read(response)
+// 	if err != nil {
+// 		fmt.Printf("failed to read connect response: %w", err)
+// 	}
+// 	fmt.Println(string(response))
+
+// 	var bt []byte
+// 	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+// 	_, err = conn.Read(bt)
+// 	if err != nil {
+// 		log.Fatalln("second ", err)
+// 	}
+// 	fmt.Println("dkdl ", string(bt))
+// }

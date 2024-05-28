@@ -103,7 +103,8 @@ func (t *TorrentFile) Download(writePath string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(peers)
+	fmt.Println(len(peers),peers)
+	// fmt.Print(peers)
 
 	return nil
 }
