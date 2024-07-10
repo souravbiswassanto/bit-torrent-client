@@ -8,6 +8,7 @@ import (
 	"os"
 
 	bencode "github.com/jackpal/bencode-go"
+	"github.com/souravbiswassanto/bit-torrent-client/p2p"
 )
 
 // Port to listen on
@@ -103,8 +104,21 @@ func (t *TorrentFile) Download(writePath string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(len(peers),peers)
+	fmt.Println(len(peers), peers)
 	// fmt.Print(peers)
+	torrent := p2p.Torrent{
+		Peers:       peers,
+		PeerID:      peerId,
+		InfoHash:    t.InfoHash,
+		PieceHashes: t.PieceHashes,
+		PieceLength: t.PieceLength,
+		Length:      t.Length,
+		Name:        t.Name,
+	}
+	err = torrent.Download()
+	if err != nil {
+		return nil
+	}
 
 	return nil
 }
