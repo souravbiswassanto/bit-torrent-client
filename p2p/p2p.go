@@ -1,9 +1,14 @@
 package p2p
 
 import (
+	"bytes"
+	"crypto/sha1"
+	"fmt"
 	"github.com/souravbiswassanto/bit-torrent-client/client"
+	"github.com/souravbiswassanto/bit-torrent-client/message"
 	"github.com/souravbiswassanto/bit-torrent-client/peers"
 	"log"
+	"time"
 )
 
 // MaxBlockSize is the largest number of bytes a request can ask for
@@ -32,6 +37,15 @@ type pieceWork struct {
 type pieceResult struct {
 	index int
 	data  []byte
+}
+
+type pieceProgress struct {
+	index      int
+	client     *client.Client
+	buf        []byte
+	downloaded int
+	requested  int
+	backlog    int
 }
 
 func (t *Torrent) Download() error {
@@ -79,5 +93,96 @@ func (t *Torrent) startDownloadWorker(peer peers.Peer, pieceStream chan *pieceWo
 		if !c.Bitfield.HasPiece(pw.index) {
 			pieceStream <- pw
 		}
+		buf, err := attemptToDownloadPieces(c, pw)
+		if err != nil {
+			log.Println("Exiting", err)
+			pieceStream <- pw
+			return
+		}
+		err = checkIntegrity(pw, buf)
+		if err != nil {
+			log.Printf("Piece #%d failed integrity check\n", pw.index)
+			return
+		}
+		c.SendHave(pw.index)
+		resultStream <- &pieceResult{
+			index: pw.index,
+			data:  buf,
+		}
 	}
+}
+
+func attemptToDownloadPieces(c *client.Client, pw *pieceWork) ([]byte, error) {
+	state := pieceProgress{
+		index:  pw.index,
+		client: c,
+		buf:    make([]byte, pw.length),
+	}
+	// Setting a deadline helps get unresponsive peers unstuck.
+	c.Conn.SetDeadline(time.Time{}.Add(30 * time.Second))
+	defer c.Conn.SetDeadline(time.Time{})
+
+	for state.downloaded < pw.length {
+		if !state.client.Choked {
+			for state.backlog < MaxBacklog && state.requested < pw.length {
+				blockSize := MaxBlockSize
+
+				if pw.length-state.requested < blockSize {
+					blockSize = pw.length - state.requested
+				}
+				err := c.SendRequest(state.index, state.requested, blockSize)
+				if err != nil {
+					return nil, err
+				}
+				state.backlog++
+				state.requested += blockSize
+			}
+		}
+		err := state.readMessage()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return state.buf, nil
+}
+
+func (pp *pieceProgress) readMessage() error {
+	msg, err := pp.client.Read() // this call blocks
+
+	if err != nil {
+		return err
+	}
+
+	if msg == nil { // keep-alive
+		return nil
+	}
+
+	switch msg.ID {
+	case message.MsgUnchoke:
+		pp.client.Choked = false
+	case message.MsgChoke:
+		pp.client.Choked = true
+	case message.MsgHave:
+		index, err := message.ParseHave(msg)
+		if err != nil {
+			return err
+		}
+		pp.client.Bitfield.SetPiece(index)
+	case message.MsgPiece:
+		n, err := message.ParsePiece(pp.index, pp.buf, msg)
+		if err != nil {
+			return err
+		}
+		pp.downloaded += n
+		pp.backlog--
+	}
+	return nil
+}
+
+func checkIntegrity(pw *pieceWork, buf []byte) error {
+	hash := sha1.Sum(buf)
+	if !bytes.Equal(hash[:], pw.hash[:]) {
+		return fmt.Errorf("Index %d failed integrity check", pw.index)
+	}
+	return nil
 }

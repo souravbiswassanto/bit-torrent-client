@@ -95,3 +95,21 @@ func (c *Client) SendUnchoke() error {
 	_, err := c.Conn.Write(msg.Serialize())
 	return err
 }
+
+func (c *Client) SendRequest(index, begin, length int) error {
+	msg := message.FormatRequest(index, begin, length)
+	_, err := c.Conn.Write(msg.Serialize())
+	return err
+}
+
+// SendHave sends a Have message to the peer
+func (c *Client) SendHave(index int) error {
+	msg := message.FormatHave(index)
+	_, err := c.Conn.Write(msg.Serialize())
+	return err
+}
+
+func (c *Client) Read() (*message.Message, error) {
+	msg, err := message.Read(c.Conn)
+	return msg, err
+}
